@@ -7,6 +7,8 @@ import hashlib
 import base64
 from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.provider import TokenVerifier, AccessToken
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import os
@@ -20,8 +22,48 @@ load_dotenv()
 # Initialize FastAPI app for HTTP endpoints
 app = FastAPI(title="Luvya MCP Server", version="1.0.0")
 
-# Initialize FastMCP server
-mcp = FastMCP("luvya")
+# Token Verifier for OAuth
+class LuvyaTokenVerifier(TokenVerifier):
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            
+            # Verify required claims
+            if "user_id" not in payload:
+                return None
+                
+            # Check expiration
+            if payload.get("exp", 0) < datetime.utcnow().timestamp():
+                return None
+            
+            return AccessToken(
+                token=token,
+                client_id=payload.get("client_id", "chatgpt-mcp-client"),
+                subject=payload.get("user_id"),
+                scopes=payload.get("scope", "user").split(" "),
+                claims=payload,
+            )
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+        except Exception as e:
+            logging.error(f"Token verification error: {e}")
+            return None
+
+# Initialize FastMCP server with OAuth configuration
+base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
+
+mcp = FastMCP(
+    name="luvya-travel-app",
+    stateless_http=True,
+    token_verifier=LuvyaTokenVerifier(),
+    auth=AuthSettings(
+        issuer_url=base_url,
+        resource_server_url=f"{base_url}/mcp",
+        required_scopes=["user"],
+    ),
+)
 
 # Configure logging to stderr (required for MCP)
 logging.basicConfig(level=logging.INFO, stream=os.sys.stderr)
@@ -48,9 +90,13 @@ def generate_auth_token(user_id: str, supabase_user_data: Dict = None) -> str:
     """Generate JWT token for user authentication with Supabase data."""
     payload = {
         "user_id": user_id,
+        "sub": user_id,
         "exp": datetime.utcnow() + timedelta(days=30),
         "iat": datetime.utcnow(),
-        "iss": "luvya-travel-app"
+        "iss": base_url,
+        "aud": f"{base_url}/mcp",
+        "client_id": "chatgpt-mcp-client",
+        "scope": "user"
     }
     
     # Include Supabase user data if available
@@ -58,8 +104,7 @@ def generate_auth_token(user_id: str, supabase_user_data: Dict = None) -> str:
         payload.update({
             "email": supabase_user_data.get("email"),
             "aud": supabase_user_data.get("aud", "authenticated"),
-            "role": supabase_user_data.get("role", "authenticated"),
-            "sub": user_id
+            "role": supabase_user_data.get("role", "authenticated")
         })
     
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
