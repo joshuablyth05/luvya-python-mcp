@@ -41,7 +41,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://dnqvfftyzetqwryfjptk.supabase.
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRucXZmZnR5emV0cXdyeWZqcHRrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA0MDk2MDcsImV4cCI6MjA3NTk4NTYwN30.SSqt0dSLXbeJ8gUz_Y8Zn9SsamQ8twe7kI2Ezz35x6g")
 
 # Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("Supabase client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Supabase client: {e}")
+    supabase = None
 
 # Initialize FastAPI app for HTTP endpoints
 app = FastAPI(title="Luvya MCP Server", version="1.0.0")
@@ -516,12 +521,19 @@ def main():
     """Main entry point - run HTTP server for Railway deployment."""
     import sys
     
+    logger.info("Starting Luvya MCP Server...")
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"Working directory: {os.getcwd()}")
+    logger.info(f"Environment variables: PORT={os.getenv('PORT')}, SUPABASE_URL={os.getenv('SUPABASE_URL', 'not set')}")
+    
     if "--mcp" in sys.argv:
         # Run as MCP server (STDIO transport)
+        logger.info("Starting in MCP mode (STDIO)")
         asyncio.run(run_mcp_server())
     else:
         # Run as HTTP server for Railway deployment
         port = int(os.getenv("PORT", 8000))
+        logger.info(f"Starting HTTP server on port {port}")
         uvicorn.run(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":

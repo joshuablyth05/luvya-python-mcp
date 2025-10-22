@@ -15,9 +15,5 @@ COPY . .
 # Expose port (for HTTP transport)
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python -c "import luvya_server; print('OK')" || exit 1
-
 # Start the MCP server
 CMD ["python", "luvya_server.py"]
