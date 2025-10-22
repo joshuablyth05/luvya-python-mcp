@@ -6,9 +6,8 @@ import secrets
 import hashlib
 import base64
 from datetime import datetime, timedelta
-from mcp.server.fastmcp import FastMCP
-from mcp.server.auth.settings import AuthSettings
-from mcp.server.auth.provider import TokenVerifier, AccessToken
+from fastmcp import FastMCP
+from fastmcp.auth import TokenVerifier, AccessToken
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import os
@@ -55,14 +54,8 @@ class LuvyaTokenVerifier(TokenVerifier):
 base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
 
 mcp = FastMCP(
-    name="luvya-travel-app",
-    stateless_http=True,
-    token_verifier=LuvyaTokenVerifier(),
-    auth=AuthSettings(
-        issuer_url=base_url,
-        resource_server_url=f"{base_url}/mcp",
-        required_scopes=["user"],
-    ),
+    "luvya-travel-app",
+    token_verifier=LuvyaTokenVerifier()
 )
 
 # Configure logging to stderr (required for MCP)
