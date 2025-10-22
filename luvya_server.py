@@ -208,7 +208,7 @@ async def oauth_start(
     """OAuth 2.1 authorization endpoint with HTML consent page."""
     from fastapi.responses import HTMLResponse
     
-    # Validate request parameters
+    # Validate request parameters (matching Gadget implementation)
     if response_type != "code":
         return {"error": "invalid_response_type"}
     
@@ -217,6 +217,12 @@ async def oauth_start(
     
     if code_challenge_method != "S256":
         return {"error": "invalid_code_challenge_method"}
+    
+    # Client validation (like Gadget)
+    # For demo purposes, accept any client_id, but in production you'd validate against a database
+    allowed_redirect_uris = ["https://chatgpt.com", "https://chat.openai.com"]
+    if redirect_uri not in allowed_redirect_uris:
+        return {"error": "invalid_redirect_uri"}
     
     # Generate authorization code
     auth_code = secrets.token_urlsafe(32)
@@ -1012,13 +1018,13 @@ async def oauth_token(
 
 @app.post("/oauth/register")
 async def oauth_register():
-    """Dynamic client registration endpoint."""
+    """Dynamic client registration endpoint (matching Gadget pattern)."""
     return {
         "client_id": "chatgpt-mcp-client",
         "client_secret": None,
         "client_id_issued_at": int(datetime.utcnow().timestamp()),
         "client_secret_expires_at": 0,
-        "redirect_uris": ["https://chatgpt.com"],
+        "redirect_uris": ["https://chatgpt.com", "https://chat.openai.com"],
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
