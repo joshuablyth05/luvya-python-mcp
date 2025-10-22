@@ -484,8 +484,8 @@ async def sign_in_page(redirectTo: str = None):
             </form>
             
             <div class="demo-note">
-                <strong>Demo Mode:</strong> Use any email/password to sign in. 
-                This will create a demo session for testing OAuth.
+                <strong>Real Authentication:</strong> Sign in with your Supabase account. 
+                <br><a href="/sign-up" style="color: #667eea; text-decoration: none;">Don't have an account? Sign up here</a>
             </div>
         </div>
     </body>
@@ -500,29 +500,264 @@ async def sign_in(
     password: str = None,
     redirectTo: str = None
 ):
-    """Handle user sign-in and create session."""
-    from fastapi.responses import RedirectResponse
+    """Handle user sign-in with Supabase authentication."""
+    from fastapi.responses import RedirectResponse, HTMLResponse
     
-    # For demo purposes, accept any email/password
-    if email and password:
-        # Create a demo user session
-        session_id = secrets.token_urlsafe(32)
-        user_id = f"user_{email.replace('@', '_').replace('.', '_')}"
-        
-        user_sessions[session_id] = {
-            "user_id": user_id,
-            "email": email,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(hours=24)
-        }
-        
-        # Redirect to the authorization page or original redirect
-        if redirectTo:
-            return RedirectResponse(url=f"{redirectTo}&session={session_id}")
-        else:
-            return RedirectResponse(url="/")
-    else:
+    if not email or not password:
         return {"error": "Missing email or password"}
+    
+    try:
+        # Authenticate user with Supabase
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": email,
+            "password": password
+        })
+        
+        if auth_response.user:
+            # Create session for authenticated user
+            session_id = secrets.token_urlsafe(32)
+            user_id = auth_response.user.id
+            
+            user_sessions[session_id] = {
+                "user_id": user_id,
+                "email": email,
+                "supabase_user": auth_response.user,
+                "access_token": auth_response.session.access_token if auth_response.session else None,
+                "created_at": datetime.utcnow(),
+                "expires_at": datetime.utcnow() + timedelta(hours=24)
+            }
+            
+            # Redirect to the authorization page or original redirect
+            if redirectTo:
+                return RedirectResponse(url=f"{redirectTo}&session={session_id}")
+            else:
+                return RedirectResponse(url="/")
+        else:
+            return HTMLResponse(content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Login Failed</title></head>
+            <body>
+                <h1>Login Failed</h1>
+                <p>Invalid email or password. Please try again.</p>
+                <a href="/sign-in?redirectTo={redirectTo or ''}">Try Again</a>
+            </body>
+            </html>
+            """)
+            
+    except Exception as e:
+        logging.error(f"Supabase authentication error: {e}")
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Login Error</title></head>
+        <body>
+            <h1>Login Error</h1>
+            <p>There was an error authenticating your account. Please try again.</p>
+            <a href="/sign-in?redirectTo={redirectTo or ''}">Try Again</a>
+        </body>
+        </html>
+        """)
+
+@app.get("/sign-up")
+async def sign_up_page():
+    """Sign-up page for new users."""
+    from fastapi.responses import HTMLResponse
+    
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Sign Up - Luvya Travel App</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 0;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 400px;
+                text-align: center;
+            }
+            .logo {
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: #667eea;
+                margin-bottom: 10px;
+            }
+            .subtitle {
+                color: #666;
+                margin-bottom: 30px;
+            }
+            .signup-form {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
+            .form-group {
+                text-align: left;
+            }
+            label {
+                display: block;
+                margin-bottom: 8px;
+                color: #333;
+                font-weight: 500;
+            }
+            input {
+                width: 100%;
+                padding: 15px;
+                border: 2px solid #e1e5e9;
+                border-radius: 10px;
+                font-size: 16px;
+                box-sizing: border-box;
+                transition: border-color 0.3s;
+            }
+            input:focus {
+                outline: none;
+                border-color: #667eea;
+            }
+            .signup-btn {
+                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                color: white;
+                border: none;
+                padding: 15px;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s;
+            }
+            .signup-btn:hover {
+                transform: translateY(-2px);
+            }
+            .login-link {
+                margin-top: 20px;
+                color: #666;
+                font-size: 14px;
+            }
+            .login-link a {
+                color: #667eea;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">✈️ Luvya</div>
+            <div class="subtitle">Create your travel account</div>
+            
+            <form class="signup-form" method="post" action="/sign-up">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required placeholder="Create a password">
+                </div>
+                
+                <div class="form-group">
+                    <label for="confirm_password">Confirm Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required placeholder="Confirm your password">
+                </div>
+                
+                <button type="submit" class="signup-btn">Create Account</button>
+            </form>
+            
+            <div class="login-link">
+                Already have an account? <a href="/sign-in">Sign in here</a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+@app.post("/sign-up")
+async def sign_up(
+    email: str = None,
+    password: str = None,
+    confirm_password: str = None
+):
+    """Handle user sign-up with Supabase."""
+    from fastapi.responses import RedirectResponse, HTMLResponse
+    
+    if not email or not password or not confirm_password:
+        return {"error": "Missing required fields"}
+    
+    if password != confirm_password:
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Sign Up Error</title></head>
+        <body>
+            <h1>Sign Up Error</h1>
+            <p>Passwords do not match. Please try again.</p>
+            <a href="/sign-up">Try Again</a>
+        </body>
+        </html>
+        """)
+    
+    try:
+        # Create user account with Supabase
+        auth_response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
+        
+        if auth_response.user:
+            return HTMLResponse(content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Account Created</title></head>
+            <body>
+                <h1>Account Created Successfully!</h1>
+                <p>Your account has been created. You can now sign in.</p>
+                <a href="/sign-in">Sign In</a>
+            </body>
+            </html>
+            """)
+        else:
+            return HTMLResponse(content="""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Sign Up Error</title></head>
+            <body>
+                <h1>Sign Up Error</h1>
+                <p>Failed to create account. Please try again.</p>
+                <a href="/sign-up">Try Again</a>
+            </body>
+            </html>
+            """)
+            
+    except Exception as e:
+        logging.error(f"Supabase sign-up error: {e}")
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head><title>Sign Up Error</title></head>
+        <body>
+            <h1>Sign Up Error</h1>
+            <p>There was an error creating your account. Please try again.</p>
+            <p>Error: {str(e)}</p>
+            <a href="/sign-up">Try Again</a>
+        </body>
+        </html>
+        """)
 
 @app.get("/authorize")
 async def authorize_page(
