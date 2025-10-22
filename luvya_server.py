@@ -3,6 +3,8 @@ import httpx
 import logging
 import jwt
 import secrets
+import hashlib
+import base64
 from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
 from supabase import create_client, Client
@@ -34,6 +36,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Current user context (will be set during authentication)
 current_user_id: Optional[str] = None
+
+# OAuth code storage (in production, use a database)
+oauth_codes: Dict[str, Dict] = {}
 
 # Helper functions for authentication
 def generate_auth_token(user_id: str) -> str:
@@ -172,8 +177,30 @@ async def oauth_start(
     """OAuth 2.1 authorization endpoint with HTML consent page."""
     from fastapi.responses import HTMLResponse
     
+    # Validate request parameters
+    if response_type != "code":
+        return {"error": "invalid_response_type"}
+    
+    if not client_id or not redirect_uri or not code_challenge:
+        return {"error": "missing_required_parameters"}
+    
+    if code_challenge_method != "S256":
+        return {"error": "invalid_code_challenge_method"}
+    
     # Generate authorization code
-    auth_code = f"auth_code_{datetime.utcnow().timestamp()}"
+    auth_code = secrets.token_urlsafe(32)
+    
+    # Store OAuth code with PKCE challenge
+    oauth_codes[auth_code] = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+        "scope": scope,
+        "state": state,
+        "expires_at": datetime.utcnow() + timedelta(minutes=5),
+        "user_id": None  # Will be set after user authentication
+    }
     
     # HTML authorization page
     html_content = f"""
@@ -347,15 +374,48 @@ async def oauth_token(
     redirect_uri: str = None,
     code_verifier: str = None
 ):
-    """OAuth 2.1 token endpoint."""
-    # Generate a simple access token for MCP
-    access_token = generate_auth_token("mcp-user")
+    """OAuth 2.1 token endpoint with PKCE validation."""
+    if grant_type != "authorization_code":
+        return {"error": "unsupported_grant_type"}
+    
+    if not code or not code_verifier:
+        return {"error": "missing_required_parameters"}
+    
+    # Get stored OAuth code
+    if code not in oauth_codes:
+        return {"error": "invalid_grant"}
+    
+    stored_code = oauth_codes[code]
+    
+    # Check expiration
+    if stored_code["expires_at"] < datetime.utcnow():
+        del oauth_codes[code]
+        return {"error": "expired_code"}
+    
+    # Validate redirect URI
+    if stored_code["redirect_uri"] != redirect_uri:
+        return {"error": "invalid_redirect_uri"}
+    
+    # Validate PKCE code verifier
+    expected_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).decode().rstrip('=')
+    
+    if expected_challenge != stored_code["code_challenge"]:
+        return {"error": "invalid_code_verifier"}
+    
+    # Generate access token
+    user_id = stored_code.get("user_id", "mcp-user")
+    access_token = generate_auth_token(user_id)
+    
+    # Clean up used code
+    del oauth_codes[code]
     
     return {
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": 3600,
-        "scope": "user"
+        "scope": stored_code["scope"]
     }
 
 @app.post("/oauth/register")
