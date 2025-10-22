@@ -141,7 +141,63 @@ async def mcp_discovery():
         "capabilities": {
             "tools": True,
             "resources": True
+        },
+        "oauth": {
+            "authorization_endpoint": "/oauth/authorize",
+            "token_endpoint": "/oauth/token",
+            "scopes": ["read", "write"]
         }
+    }
+
+# OAuth 2.1 Endpoints for ChatGPT MCP Connector
+@app.get("/oauth/authorize")
+async def oauth_authorize(
+    response_type: str = "code",
+    client_id: str = "chatgpt-mcp",
+    redirect_uri: str = None,
+    scope: str = "read write",
+    state: str = None
+):
+    """OAuth 2.1 authorization endpoint."""
+    # For MCP, we'll return a simple authorization page
+    return {
+        "authorization_url": f"/oauth/authorize?response_type={response_type}&client_id={client_id}&scope={scope}",
+        "client_id": client_id,
+        "scopes": scope.split(" "),
+        "state": state
+    }
+
+@app.post("/oauth/token")
+async def oauth_token(
+    grant_type: str = "authorization_code",
+    code: str = None,
+    client_id: str = "chatgpt-mcp",
+    client_secret: str = None,
+    redirect_uri: str = None
+):
+    """OAuth 2.1 token endpoint."""
+    # Generate a simple access token for MCP
+    access_token = generate_auth_token("mcp-user")
+    
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "scope": "read write"
+    }
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    """OAuth 2.1 metadata endpoint."""
+    base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
+    
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "token_endpoint": f"{base_url}/oauth/token",
+        "scopes_supported": ["read", "write"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"]
     }
 
 # MCP Tools
