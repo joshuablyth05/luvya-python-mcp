@@ -44,13 +44,24 @@ oauth_codes: Dict[str, Dict] = {}
 user_sessions: Dict[str, Dict] = {}
 
 # Helper functions for authentication
-def generate_auth_token(user_id: str) -> str:
-    """Generate JWT token for user authentication."""
+def generate_auth_token(user_id: str, supabase_user_data: Dict = None) -> str:
+    """Generate JWT token for user authentication with Supabase data."""
     payload = {
         "user_id": user_id,
         "exp": datetime.utcnow() + timedelta(days=30),
-        "iat": datetime.utcnow()
+        "iat": datetime.utcnow(),
+        "iss": "luvya-travel-app"
     }
+    
+    # Include Supabase user data if available
+    if supabase_user_data:
+        payload.update({
+            "email": supabase_user_data.get("email"),
+            "aud": supabase_user_data.get("aud", "authenticated"),
+            "role": supabase_user_data.get("role", "authenticated"),
+            "sub": user_id
+        })
+    
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 def verify_auth_token(token: str) -> Optional[str]:
@@ -71,6 +82,23 @@ def set_current_user(user_id: str):
 def get_current_user() -> Optional[str]:
     """Get the current user ID."""
     return current_user_id
+
+async def get_supabase_user_data(user_id: str) -> Optional[Dict]:
+    """Get user data from Supabase by user ID."""
+    try:
+        response = supabase.auth.admin.get_user_by_id(user_id)
+        if response.user:
+            return {
+                "id": response.user.id,
+                "email": response.user.email,
+                "aud": "authenticated",
+                "role": "authenticated",
+                "created_at": response.user.created_at,
+                "email_confirmed_at": response.user.email_confirmed_at
+            }
+    except Exception as e:
+        logging.error(f"Error getting Supabase user data: {e}")
+    return None
 
 # Helper functions for Supabase operations
 async def make_supabase_request(table: str, operation: str = "select", data: Optional[Dict] = None, filters: Optional[Dict] = None) -> Dict[str, Any] | None:
@@ -202,7 +230,8 @@ async def oauth_start(
         "scope": scope,
         "state": state,
         "expires_at": datetime.utcnow() + timedelta(minutes=5),
-        "user_id": None  # Will be set after user authentication
+        "user_id": None,  # Will be set after user authentication
+        "session": None   # Will be set after user authentication
     }
     
     # HTML authorization page
@@ -781,9 +810,10 @@ async def authorize_page(
         redirectTo = f"/authorize?code={code}&state={state}&redirect_uri={redirect_uri}"
         return RedirectResponse(url=f"/sign-in?redirectTo={redirectTo}")
     
-    # Update the OAuth code with user ID
+    # Update the OAuth code with user ID and session
     if code and code in oauth_codes:
         oauth_codes[code]["user_id"] = user_id
+        oauth_codes[code]["session"] = session
     
     html_content = f"""
     <!DOCTYPE html>
@@ -948,9 +978,27 @@ async def oauth_token(
     if expected_challenge != stored_code["code_challenge"]:
         return {"error": "invalid_code_verifier"}
     
-    # Generate access token
+    # Generate access token with Supabase user data
     user_id = stored_code.get("user_id", "mcp-user")
-    access_token = generate_auth_token(user_id)
+    
+    # Get Supabase user data from session or database
+    supabase_user_data = None
+    if "session" in stored_code:
+        session_id = stored_code["session"]
+        if session_id in user_sessions:
+            session_data = user_sessions[session_id]
+            if session_data.get("supabase_user"):
+                supabase_user_data = {
+                    "email": session_data.get("email"),
+                    "aud": "authenticated",
+                    "role": "authenticated"
+                }
+    
+    # If no session data, try to get from Supabase directly
+    if not supabase_user_data and user_id != "mcp-user":
+        supabase_user_data = await get_supabase_user_data(user_id)
+    
+    access_token = generate_auth_token(user_id, supabase_user_data)
     
     # Clean up used code
     del oauth_codes[code]
