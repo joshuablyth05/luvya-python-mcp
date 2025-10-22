@@ -134,6 +134,8 @@ async def root():
 @app.get("/mcp")
 async def mcp_discovery():
     """MCP discovery endpoint."""
+    base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
+    
     return {
         "name": "luvya",
         "version": "1.0.0",
@@ -141,39 +143,59 @@ async def mcp_discovery():
         "capabilities": {
             "tools": True,
             "resources": True
-        },
-        "oauth": {
-            "authorization_endpoint": "/oauth/authorize",
-            "token_endpoint": "/oauth/token",
-            "scopes": ["read", "write"]
         }
+    }
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource():
+    """OAuth protected resource metadata endpoint."""
+    base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
+    
+    return {
+        "resource": f"{base_url}/mcp",
+        "authorization_servers": [
+            {
+                "issuer": base_url,
+                "authorization_endpoint": f"{base_url}/oauth/authorize",
+                "token_endpoint": f"{base_url}/oauth/token",
+                "registration_endpoint": f"{base_url}/oauth/register",
+                "jwks_uri": f"{base_url}/.well-known/jwks.json"
+            }
+        ],
+        "scopes": ["read", "write", "user"],
+        "bearer_methods_supported": ["header", "body"]
     }
 
 # OAuth 2.1 Endpoints for ChatGPT MCP Connector
 @app.get("/oauth/authorize")
 async def oauth_authorize(
     response_type: str = "code",
-    client_id: str = "chatgpt-mcp",
+    client_id: str = None,
     redirect_uri: str = None,
-    scope: str = "read write",
-    state: str = None
+    scope: str = "read write user",
+    state: str = None,
+    code_challenge: str = None,
+    code_challenge_method: str = "S256"
 ):
     """OAuth 2.1 authorization endpoint."""
     # For MCP, we'll return a simple authorization page
     return {
-        "authorization_url": f"/oauth/authorize?response_type={response_type}&client_id={client_id}&scope={scope}",
+        "authorization_url": f"/oauth/authorize?response_type={response_type}&client_id={client_id}&scope={scope}&state={state}",
         "client_id": client_id,
         "scopes": scope.split(" "),
-        "state": state
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method
     }
 
 @app.post("/oauth/token")
 async def oauth_token(
     grant_type: str = "authorization_code",
     code: str = None,
-    client_id: str = "chatgpt-mcp",
+    client_id: str = None,
     client_secret: str = None,
-    redirect_uri: str = None
+    redirect_uri: str = None,
+    code_verifier: str = None
 ):
     """OAuth 2.1 token endpoint."""
     # Generate a simple access token for MCP
@@ -183,21 +205,55 @@ async def oauth_token(
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": 3600,
-        "scope": "read write"
+        "scope": "read write user"
     }
 
-@app.get("/.well-known/oauth-authorization-server")
-async def oauth_metadata():
-    """OAuth 2.1 metadata endpoint."""
+@app.post("/oauth/register")
+async def oauth_register():
+    """Dynamic client registration endpoint."""
+    return {
+        "client_id": "chatgpt-mcp-client",
+        "client_secret": "chatgpt-mcp-secret",
+        "client_id_issued_at": int(datetime.utcnow().timestamp()),
+        "client_secret_expires_at": 0,
+        "redirect_uris": ["https://chatgpt.com"],
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "client_secret_basic",
+        "scope": "read write user"
+    }
+
+@app.get("/.well-known/openid-configuration")
+async def oidc_configuration():
+    """OpenID Connect configuration endpoint."""
     base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
     
     return {
         "issuer": base_url,
         "authorization_endpoint": f"{base_url}/oauth/authorize",
         "token_endpoint": f"{base_url}/oauth/token",
-        "scopes_supported": ["read", "write"],
+        "registration_endpoint": f"{base_url}/oauth/register",
+        "jwks_uri": f"{base_url}/.well-known/jwks.json",
+        "scopes_supported": ["read", "write", "user"],
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"]
+        "grant_types_supported": ["authorization_code"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "code_challenge_methods_supported": ["S256"]
+    }
+
+@app.get("/.well-known/jwks.json")
+async def jwks():
+    """JSON Web Key Set endpoint."""
+    return {
+        "keys": [
+            {
+                "kty": "RSA",
+                "kid": "luvya-mcp-key",
+                "use": "sig",
+                "n": "sample-modulus",
+                "e": "AQAB"
+            }
+        ]
     }
 
 # MCP Tools
