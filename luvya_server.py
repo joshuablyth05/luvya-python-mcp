@@ -153,26 +153,18 @@ async def oauth_protected_resource():
     
     return {
         "resource": f"{base_url}/mcp",
-        "authorization_servers": [
-            {
-                "issuer": base_url,
-                "authorization_endpoint": f"{base_url}/oauth/authorize",
-                "token_endpoint": f"{base_url}/oauth/token",
-                "registration_endpoint": f"{base_url}/oauth/register",
-                "jwks_uri": f"{base_url}/.well-known/jwks.json"
-            }
-        ],
-        "scopes": ["read", "write", "user"],
-        "bearer_methods_supported": ["header", "body"]
+        "authorization_servers": [base_url],
+        "scopes_supported": ["user"],
+        "bearer_methods_supported": ["header"]
     }
 
 # OAuth 2.1 Endpoints for ChatGPT MCP Connector
-@app.get("/oauth/authorize")
-async def oauth_authorize(
+@app.get("/oauth/start")
+async def oauth_start(
     response_type: str = "code",
     client_id: str = None,
     redirect_uri: str = None,
-    scope: str = "read write user",
+    scope: str = "user",
     state: str = None,
     code_challenge: str = None,
     code_challenge_method: str = "S256"
@@ -363,7 +355,7 @@ async def oauth_token(
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": 3600,
-        "scope": "read write user"
+        "scope": "user"
     }
 
 @app.post("/oauth/register")
@@ -371,14 +363,14 @@ async def oauth_register():
     """Dynamic client registration endpoint."""
     return {
         "client_id": "chatgpt-mcp-client",
-        "client_secret": "chatgpt-mcp-secret",
+        "client_secret": None,
         "client_id_issued_at": int(datetime.utcnow().timestamp()),
         "client_secret_expires_at": 0,
         "redirect_uris": ["https://chatgpt.com"],
         "grant_types": ["authorization_code"],
         "response_types": ["code"],
-        "token_endpoint_auth_method": "client_secret_basic",
-        "scope": "read write user"
+        "token_endpoint_auth_method": "none",
+        "scope": "user"
     }
 
 @app.get("/.well-known/openid-configuration")
@@ -388,18 +380,17 @@ async def oidc_configuration():
     
     return {
         "issuer": base_url,
-        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "authorization_endpoint": f"{base_url}/oauth/start",
         "token_endpoint": f"{base_url}/oauth/token",
+        "jwks_uri": f"{base_url}/oauth/jwks.json",
         "registration_endpoint": f"{base_url}/oauth/register",
-        "jwks_uri": f"{base_url}/.well-known/jwks.json",
-        "scopes_supported": ["read", "write", "user"],
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
-        "code_challenge_methods_supported": ["S256"]
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"]
     }
 
-@app.get("/.well-known/jwks.json")
+@app.get("/oauth/jwks.json")
 async def jwks():
     """JSON Web Key Set endpoint."""
     return {
