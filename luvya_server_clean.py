@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 """
 Luvya Travel App MCP Server with FastMCP 2.0 and Supabase Integration
-
-This server uses FastMCP 2.0 (https://github.com/jlowin/fastmcp) which provides:
-- Enterprise-grade OAuth authentication for ChatGPT integration
-- Automatic OAuth discovery endpoints
-- Built-in JWT token verification
-- Zero-configuration authentication setup
-
-ChatGPT will automatically discover OAuth capabilities and handle the authentication flow.
 """
 
 from typing import Any, Dict, List, Optional
@@ -37,7 +29,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 base_url = os.getenv("RAILWAY_PUBLIC_DOMAIN", "https://luvya-python-mcp-production-abc123.up.railway.app")
 
 # Configure JWT verification using FastMCP's built-in JWTVerifier
-# This enables enterprise-grade authentication for ChatGPT integration
 jwt_verifier = JWTVerifier(
     public_key=JWT_SECRET,  # Using our JWT secret as the symmetric key
     issuer=base_url,
@@ -45,8 +36,6 @@ jwt_verifier = JWTVerifier(
     algorithm="HS256"
 )
 
-# Initialize FastMCP with authentication enabled
-# FastMCP 2.0 automatically provides OAuth discovery endpoints for ChatGPT
 mcp = FastMCP(
     "luvya-travel-app",
     auth=jwt_verifier
