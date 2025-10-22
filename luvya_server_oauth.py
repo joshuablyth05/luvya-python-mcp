@@ -8,15 +8,9 @@ from mcp.server.fastmcp import FastMCP
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import os
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 
 # Load environment variables
 load_dotenv()
-
-# Initialize FastAPI app for HTTP endpoints
-app = FastAPI(title="Luvya MCP Server", version="1.0.0")
 
 # Initialize FastMCP server
 mcp = FastMCP("luvya")
@@ -119,30 +113,6 @@ def format_notification(notification_data: Dict) -> str:
 Message: {notification_data.get('message', 'No message')}
 Date: {notification_data.get('created_at', 'Unknown')}
 """
-
-# FastAPI HTTP Endpoints
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for deployment platforms."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {"message": "Luvya MCP Server", "status": "running"}
-
-@app.get("/mcp")
-async def mcp_discovery():
-    """MCP discovery endpoint."""
-    return {
-        "name": "luvya",
-        "version": "1.0.0",
-        "protocol": "mcp",
-        "capabilities": {
-            "tools": True,
-            "resources": True
-        }
-    }
 
 # MCP Tools
 @mcp.tool()
@@ -526,16 +496,8 @@ async def notifications_widget() -> str:
 """
 
 def main():
-    """Run the server - either as HTTP server or MCP server based on environment."""
-    import sys
-    
-    if "--mcp" in sys.argv:
-        # Run as MCP server (STDIO transport)
-        mcp.run(transport='stdio')
-    else:
-        # Run as HTTP server
-        port = int(os.getenv("PORT", 8000))
-        uvicorn.run(app, host="0.0.0.0", port=port)
+    """Initialize and run the MCP server."""
+    mcp.run(transport='stdio')
 
 if __name__ == "__main__":
     main()
