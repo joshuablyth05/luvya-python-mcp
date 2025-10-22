@@ -14,10 +14,15 @@ ChatGPT will automatically discover OAuth capabilities and handle the authentica
 from typing import Any, Dict, List, Optional
 import logging
 import os
+import secrets
+import hashlib
+import base64
+from datetime import datetime, timedelta
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import jwt
 
 # Load environment variables
 load_dotenv()
@@ -51,6 +56,37 @@ mcp = FastMCP(
     "luvya-travel-app",
     auth=jwt_verifier
 )
+
+# OAuth code storage (in production, use a database)
+oauth_codes: Dict[str, Dict] = {}
+
+# User sessions (in production, use a database)
+user_sessions: Dict[str, Dict] = {}
+
+# Helper functions for OAuth 2.1 implementation
+def generate_auth_token(user_id: str) -> str:
+    """Generate JWT token for user authentication."""
+    payload = {
+        "user_id": user_id,
+        "sub": user_id,
+        "exp": datetime.utcnow() + timedelta(days=30),
+        "iat": datetime.utcnow(),
+        "iss": base_url,
+        "aud": f"{base_url}/mcp",
+        "client_id": "chatgpt-mcp-client",
+        "scope": "user"
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+def verify_auth_token(token: str) -> Optional[str]:
+    """Verify JWT token and return user_id."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload.get("user_id")
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
 
 # Data models
 class Trip:
@@ -320,6 +356,290 @@ async def notifications_widget() -> str:
     </body>
     </html>
     """
+
+# OAuth 2.1 Endpoints required by ChatGPT
+# These endpoints implement the OAuth 2.1 specification for MCP servers
+
+@mcp.route("/.well-known/oauth-authorization-server", methods=["GET"])
+async def oauth_authorization_server():
+    """OAuth 2.0 Authorization Server Metadata endpoint (RFC8414)."""
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/authorize",
+        "token_endpoint": f"{base_url}/token",
+        "jwks_uri": f"{base_url}/.well-known/jwks.json",
+        "registration_endpoint": f"{base_url}/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"]
+    }
+
+@mcp.route("/.well-known/jwks.json", methods=["GET"])
+async def jwks():
+    """JSON Web Key Set endpoint."""
+    return {
+        "keys": [
+            {
+                "kty": "oct",
+                "kid": "luvya-mcp-key",
+                "use": "sig",
+                "alg": "HS256"
+            }
+        ]
+    }
+
+@mcp.route("/register", methods=["POST"])
+async def oauth_register():
+    """Dynamic client registration endpoint (RFC7591)."""
+    return {
+        "client_id": "chatgpt-mcp-client",
+        "client_secret": None,
+        "client_id_issued_at": int(datetime.utcnow().timestamp()),
+        "client_secret_expires_at": 0,
+        "redirect_uris": ["https://chatgpt.com", "https://chat.openai.com"],
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "scope": "user"
+    }
+
+@mcp.route("/authorize", methods=["GET"])
+async def oauth_authorize(
+    response_type: str = "code",
+    client_id: str = None,
+    redirect_uri: str = None,
+    scope: str = "user",
+    state: str = None,
+    code_challenge: str = None,
+    code_challenge_method: str = "S256"
+):
+    """OAuth 2.1 authorization endpoint with PKCE support."""
+    from fastapi.responses import HTMLResponse
+    
+    # Validate request parameters
+    if response_type != "code":
+        return {"error": "invalid_response_type"}
+    
+    if not client_id or not redirect_uri or not code_challenge:
+        return {"error": "missing_required_parameters"}
+    
+    if code_challenge_method != "S256":
+        return {"error": "invalid_code_challenge_method"}
+    
+    # Generate authorization code
+    auth_code = secrets.token_urlsafe(32)
+    
+    # Store OAuth code with PKCE challenge
+    oauth_codes[auth_code] = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "code_challenge": code_challenge,
+        "code_challenge_method": code_challenge_method,
+        "scope": scope,
+        "state": state,
+        "expires_at": datetime.utcnow() + timedelta(minutes=5),
+        "user_id": "demo-user"  # In production, this would be set after user login
+    }
+    
+    # HTML authorization page
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Authorize Luvya Travel App</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .auth-container {{
+                background: white;
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 500px;
+                width: 100%;
+                text-align: center;
+            }}
+            .logo {{
+                font-size: 48px;
+                margin-bottom: 20px;
+            }}
+            .app-name {{
+                font-size: 28px;
+                font-weight: 600;
+                color: #333;
+                margin-bottom: 10px;
+            }}
+            .app-description {{
+                color: #666;
+                margin-bottom: 30px;
+                line-height: 1.5;
+            }}
+            .permissions {{
+                background: #f8f9fa;
+                border-radius: 12px;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: left;
+            }}
+            .permission-item {{
+                display: flex;
+                align-items: center;
+                margin: 10px 0;
+                font-size: 16px;
+            }}
+            .permission-icon {{
+                width: 20px;
+                height: 20px;
+                margin-right: 12px;
+                color: #28a745;
+            }}
+            .buttons {{
+                display: flex;
+                gap: 15px;
+                margin-top: 30px;
+            }}
+            .btn {{
+                flex: 1;
+                padding: 14px 24px;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+            }}
+            .btn-allow {{
+                background: #007bff;
+                color: white;
+            }}
+            .btn-allow:hover {{
+                background: #0056b3;
+                transform: translateY(-1px);
+            }}
+            .btn-deny {{
+                background: #6c757d;
+                color: white;
+            }}
+            .btn-deny:hover {{
+                background: #545b62;
+                transform: translateY(-1px);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="auth-container">
+            <div class="logo">🗺️</div>
+            <div class="app-name">Luvya Travel App</div>
+            <div class="app-description">
+                ChatGPT wants to access your Luvya Travel account to help you manage your trips, events, and notifications.
+            </div>
+            
+            <div class="permissions">
+                <h3 style="margin-top: 0; color: #333;">Permissions Requested:</h3>
+                <div class="permission-item">
+                    <span class="permission-icon">📖</span>
+                    <span>Read your travel data (trips, events, notifications)</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">✏️</span>
+                    <span>Create and manage your trips and events</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">👤</span>
+                    <span>Access your user profile information</span>
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn btn-deny" onclick="denyAccess()">Deny</button>
+                <button class="btn btn-allow" onclick="allowAccess()">Allow</button>
+            </div>
+        </div>
+        
+        <script>
+            function allowAccess() {{
+                const redirectUrl = new URL("{redirect_uri}");
+                redirectUrl.searchParams.set("code", "{auth_code}");
+                redirectUrl.searchParams.set("state", "{state or ''}");
+                window.location.href = redirectUrl.toString();
+            }}
+            
+            function denyAccess() {{
+                const redirectUrl = new URL("{redirect_uri}");
+                redirectUrl.searchParams.set("error", "access_denied");
+                redirectUrl.searchParams.set("state", "{state or ''}");
+                window.location.href = redirectUrl.toString();
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+@mcp.route("/token", methods=["POST"])
+async def oauth_token(
+    grant_type: str = "authorization_code",
+    code: str = None,
+    client_id: str = None,
+    client_secret: str = None,
+    redirect_uri: str = None,
+    code_verifier: str = None
+):
+    """OAuth 2.1 token endpoint with PKCE validation."""
+    if grant_type != "authorization_code":
+        return {"error": "unsupported_grant_type"}
+    
+    if not code or not code_verifier:
+        return {"error": "missing_required_parameters"}
+    
+    # Get stored OAuth code
+    if code not in oauth_codes:
+        return {"error": "invalid_grant"}
+    
+    stored_code = oauth_codes[code]
+    
+    # Check expiration
+    if stored_code["expires_at"] < datetime.utcnow():
+        del oauth_codes[code]
+        return {"error": "expired_code"}
+    
+    # Validate redirect URI
+    if stored_code["redirect_uri"] != redirect_uri:
+        return {"error": "invalid_redirect_uri"}
+    
+    # Validate PKCE code verifier
+    expected_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).decode().rstrip('=')
+    
+    if expected_challenge != stored_code["code_challenge"]:
+        return {"error": "invalid_code_verifier"}
+    
+    # Generate access token
+    user_id = stored_code.get("user_id", "demo-user")
+    access_token = generate_auth_token(user_id)
+    
+    # Clean up used code
+    del oauth_codes[code]
+    
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "scope": stored_code["scope"]
+    }
 
 if __name__ == "__main__":
     # Run the FastMCP server
