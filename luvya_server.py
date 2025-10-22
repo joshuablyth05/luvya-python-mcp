@@ -177,16 +177,174 @@ async def oauth_authorize(
     code_challenge: str = None,
     code_challenge_method: str = "S256"
 ):
-    """OAuth 2.1 authorization endpoint."""
-    # For MCP, we'll return a simple authorization page
-    return {
-        "authorization_url": f"/oauth/authorize?response_type={response_type}&client_id={client_id}&scope={scope}&state={state}",
-        "client_id": client_id,
-        "scopes": scope.split(" "),
-        "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": code_challenge_method
-    }
+    """OAuth 2.1 authorization endpoint with HTML consent page."""
+    from fastapi.responses import HTMLResponse
+    
+    # Generate authorization code
+    auth_code = f"auth_code_{datetime.utcnow().timestamp()}"
+    
+    # HTML authorization page
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Authorize Luvya Travel App</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .auth-container {{
+                background: white;
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                max-width: 500px;
+                width: 100%;
+                text-align: center;
+            }}
+            .logo {{
+                font-size: 48px;
+                margin-bottom: 20px;
+            }}
+            .app-name {{
+                font-size: 28px;
+                font-weight: 600;
+                color: #333;
+                margin-bottom: 10px;
+            }}
+            .app-description {{
+                color: #666;
+                margin-bottom: 30px;
+                line-height: 1.5;
+            }}
+            .permissions {{
+                background: #f8f9fa;
+                border-radius: 12px;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: left;
+            }}
+            .permission-item {{
+                display: flex;
+                align-items: center;
+                margin: 10px 0;
+                font-size: 16px;
+            }}
+            .permission-icon {{
+                width: 20px;
+                height: 20px;
+                margin-right: 12px;
+                color: #28a745;
+            }}
+            .buttons {{
+                display: flex;
+                gap: 15px;
+                margin-top: 30px;
+            }}
+            .btn {{
+                flex: 1;
+                padding: 14px 24px;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+            }}
+            .btn-allow {{
+                background: #007bff;
+                color: white;
+            }}
+            .btn-allow:hover {{
+                background: #0056b3;
+                transform: translateY(-1px);
+            }}
+            .btn-deny {{
+                background: #6c757d;
+                color: white;
+            }}
+            .btn-deny:hover {{
+                background: #545b62;
+                transform: translateY(-1px);
+            }}
+            .client-info {{
+                font-size: 14px;
+                color: #666;
+                margin-top: 20px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="auth-container">
+            <div class="logo">🗺️</div>
+            <div class="app-name">Luvya Travel App</div>
+            <div class="app-description">
+                ChatGPT wants to access your Luvya Travel account to help you manage your trips, events, and notifications.
+            </div>
+            
+            <div class="permissions">
+                <h3 style="margin-top: 0; color: #333;">Permissions Requested:</h3>
+                <div class="permission-item">
+                    <span class="permission-icon">📖</span>
+                    <span>Read your travel data (trips, events, notifications)</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">✏️</span>
+                    <span>Create and manage your trips and events</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">👤</span>
+                    <span>Access your user profile information</span>
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn btn-deny" onclick="denyAccess()">Deny</button>
+                <button class="btn btn-allow" onclick="allowAccess()">Allow</button>
+            </div>
+            
+            <div class="client-info">
+                <strong>Client:</strong> {client_id or 'ChatGPT MCP Client'}<br>
+                <strong>Scopes:</strong> {scope}<br>
+                <strong>Requested:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}
+            </div>
+        </div>
+        
+        <script>
+            function allowAccess() {{
+                const params = new URLSearchParams({{
+                    code: '{auth_code}',
+                    state: '{state or ""}'
+                }});
+                const redirectUrl = '{redirect_uri or "https://chatgpt.com"}?' + params.toString();
+                window.location.href = redirectUrl;
+            }}
+            
+            function denyAccess() {{
+                const params = new URLSearchParams({{
+                    error: 'access_denied',
+                    state: '{state or ""}'
+                }});
+                const redirectUrl = '{redirect_uri or "https://chatgpt.com"}?' + params.toString();
+                window.location.href = redirectUrl;
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
 
 @app.post("/oauth/token")
 async def oauth_token(
