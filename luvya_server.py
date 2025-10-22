@@ -40,6 +40,9 @@ current_user_id: Optional[str] = None
 # OAuth code storage (in production, use a database)
 oauth_codes: Dict[str, Dict] = {}
 
+# User sessions (in production, use a database)
+user_sessions: Dict[str, Dict] = {}
+
 # Helper functions for authentication
 def generate_auth_token(user_id: str) -> str:
     """Generate JWT token for user authentication."""
@@ -359,6 +362,312 @@ async def oauth_start(
                 window.location.href = redirectUrl;
             }}
         </script>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+@app.get("/sign-in")
+async def sign_in_page(redirectTo: str = None):
+    """Sign-in page for user authentication."""
+    from fastapi.responses import HTMLResponse
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Sign In - Luvya Travel App</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 0;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .container {{
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 400px;
+                text-align: center;
+            }}
+            .logo {{
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: #667eea;
+                margin-bottom: 10px;
+            }}
+            .subtitle {{
+                color: #666;
+                margin-bottom: 30px;
+            }}
+            .login-form {{
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }}
+            .form-group {{
+                text-align: left;
+            }}
+            label {{
+                display: block;
+                margin-bottom: 8px;
+                color: #333;
+                font-weight: 500;
+            }}
+            input {{
+                width: 100%;
+                padding: 15px;
+                border: 2px solid #e1e5e9;
+                border-radius: 10px;
+                font-size: 16px;
+                box-sizing: border-box;
+                transition: border-color 0.3s;
+            }}
+            input:focus {{
+                outline: none;
+                border-color: #667eea;
+            }}
+            .login-btn {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                padding: 15px;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s;
+            }}
+            .login-btn:hover {{
+                transform: translateY(-2px);
+            }}
+            .demo-note {{
+                background: #f8f9fa;
+                border: 1px solid #e9ecef;
+                border-radius: 10px;
+                padding: 15px;
+                margin-top: 20px;
+                font-size: 14px;
+                color: #666;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">✈️ Luvya</div>
+            <div class="subtitle">Sign in to your travel account</div>
+            
+            <form class="login-form" method="post" action="/sign-in">
+                <input type="hidden" name="redirectTo" value="{redirectTo or ''}">
+                
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required placeholder="Enter your password">
+                </div>
+                
+                <button type="submit" class="login-btn">Sign In</button>
+            </form>
+            
+            <div class="demo-note">
+                <strong>Demo Mode:</strong> Use any email/password to sign in. 
+                This will create a demo session for testing OAuth.
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return HTMLResponse(content=html_content)
+
+@app.post("/sign-in")
+async def sign_in(
+    email: str = None,
+    password: str = None,
+    redirectTo: str = None
+):
+    """Handle user sign-in and create session."""
+    from fastapi.responses import RedirectResponse
+    
+    # For demo purposes, accept any email/password
+    if email and password:
+        # Create a demo user session
+        session_id = secrets.token_urlsafe(32)
+        user_id = f"user_{email.replace('@', '_').replace('.', '_')}"
+        
+        user_sessions[session_id] = {
+            "user_id": user_id,
+            "email": email,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(hours=24)
+        }
+        
+        # Redirect to the authorization page or original redirect
+        if redirectTo:
+            return RedirectResponse(url=f"{redirectTo}&session={session_id}")
+        else:
+            return RedirectResponse(url="/")
+    else:
+        return {"error": "Missing email or password"}
+
+@app.get("/authorize")
+async def authorize_page(
+    code: str = None,
+    state: str = None,
+    redirect_uri: str = None,
+    session: str = None
+):
+    """Authorization page where user grants permission to ChatGPT."""
+    from fastapi.responses import HTMLResponse
+    
+    # Check if user is logged in via session
+    user_id = None
+    if session and session in user_sessions:
+        user_session = user_sessions[session]
+        if user_session["expires_at"] > datetime.utcnow():
+            user_id = user_session["user_id"]
+    
+    if not user_id:
+        # Redirect to sign-in
+        redirectTo = f"/authorize?code={code}&state={state}&redirect_uri={redirect_uri}"
+        return RedirectResponse(url=f"/sign-in?redirectTo={redirectTo}")
+    
+    # Update the OAuth code with user ID
+    if code and code in oauth_codes:
+        oauth_codes[code]["user_id"] = user_id
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Authorize Access - Luvya Travel App</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 0;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            .container {{
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                width: 100%;
+                max-width: 500px;
+                text-align: center;
+            }}
+            .logo {{
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: #667eea;
+                margin-bottom: 10px;
+            }}
+            .app-name {{
+                font-size: 1.5rem;
+                color: #333;
+                margin-bottom: 30px;
+            }}
+            .permission-list {{
+                background: #f8f9fa;
+                border-radius: 10px;
+                padding: 20px;
+                margin: 20px 0;
+                text-align: left;
+            }}
+            .permission-item {{
+                display: flex;
+                align-items: center;
+                margin: 10px 0;
+                color: #333;
+            }}
+            .permission-icon {{
+                margin-right: 10px;
+                font-size: 1.2rem;
+            }}
+            .button-group {{
+                display: flex;
+                gap: 15px;
+                justify-content: center;
+                margin-top: 30px;
+            }}
+            .btn {{
+                padding: 15px 30px;
+                border: none;
+                border-radius: 10px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s;
+                text-decoration: none;
+                display: inline-block;
+            }}
+            .btn:hover {{
+                transform: translateY(-2px);
+            }}
+            .btn-allow {{
+                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                color: white;
+            }}
+            .btn-deny {{
+                background: #6c757d;
+                color: white;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">✈️ Luvya</div>
+            <div class="app-name">ChatGPT wants to access your account</div>
+            
+            <div class="permission-list">
+                <div class="permission-item">
+                    <span class="permission-icon">👤</span>
+                    <span>Access your user profile</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">🗺️</span>
+                    <span>View and manage your trips</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">📅</span>
+                    <span>View and manage trip events</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">🔔</span>
+                    <span>View your notifications</span>
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <a href="{redirect_uri}?code={code}&state={state}" class="btn btn-allow">
+                    Allow Access
+                </a>
+                <a href="{redirect_uri}?error=access_denied&state={state}" class="btn btn-deny">
+                    Deny
+                </a>
+            </div>
+        </div>
     </body>
     </html>
     """
