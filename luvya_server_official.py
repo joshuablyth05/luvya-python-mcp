@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Luvya Travel App MCP Server with HTTP endpoints for Railway deployment
+Luvya Travel App MCP Server using Official Python SDK
 """
 
 import asyncio
@@ -25,9 +25,6 @@ from mcp.types import (
 )
 from supabase import create_client, Client
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-import uvicorn
 
 # Load environment variables
 load_dotenv()
@@ -43,11 +40,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Initialize FastAPI app for HTTP endpoints
-app = FastAPI(title="Luvya MCP Server", version="1.0.0")
-
 # Initialize MCP server
-mcp_server = Server("luvya-travel-app")
+server = Server("luvya-travel-app")
 
 # Helper functions for Supabase operations
 async def make_supabase_request(table: str, operation: str = "select", data: Optional[Dict] = None, filters: Optional[Dict] = None) -> Dict[str, Any] | None:
@@ -78,32 +72,8 @@ async def make_supabase_request(table: str, operation: str = "select", data: Opt
         logger.error(f"Supabase request failed: {e}")
         return None
 
-# HTTP Endpoints for Railway deployment
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for Railway deployment."""
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {"message": "Luvya MCP Server", "status": "running"}
-
-@app.get("/mcp")
-async def mcp_discovery():
-    """MCP discovery endpoint."""
-    return {
-        "name": "luvya-travel-app",
-        "version": "1.0.0",
-        "protocol": "mcp",
-        "capabilities": {
-            "tools": True,
-            "resources": True
-        }
-    }
-
 # MCP Tools
-@mcp_server.list_tools()
+@server.list_tools()
 async def handle_list_tools() -> ListToolsResult:
     """List available tools."""
     return ListToolsResult(
@@ -217,7 +187,7 @@ async def handle_list_tools() -> ListToolsResult:
         ]
     )
 
-@mcp_server.call_tool()
+@server.call_tool()
 async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResult:
     """Handle tool calls."""
     try:
@@ -397,7 +367,7 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> CallToolResu
         )
 
 # MCP Resources (Widgets)
-@mcp_server.list_resources()
+@server.list_resources()
 async def handle_list_resources() -> ListResourcesResult:
     """List available resources."""
     return ListResourcesResult(
@@ -423,7 +393,7 @@ async def handle_list_resources() -> ListResourcesResult:
         ]
     )
 
-@mcp_server.read_resource()
+@server.read_resource()
 async def handle_read_resource(uri: str) -> str:
     """Handle resource reads."""
     if uri == "widget://trips":
@@ -496,33 +466,21 @@ async def handle_read_resource(uri: str) -> str:
     else:
         raise ValueError(f"Unknown resource: {uri}")
 
-async def run_mcp_server():
+async def main():
     """Run the MCP server."""
     async with stdio_server() as (read_stream, write_stream):
-        await mcp_server.run(
+        await server.run(
             read_stream,
             write_stream,
             InitializationOptions(
                 server_name="luvya-travel-app",
                 server_version="1.0.0",
-                capabilities=mcp_server.get_capabilities(
+                capabilities=server.get_capabilities(
                     notification_options=None,
                     experimental_capabilities=None,
                 ),
             ),
         )
 
-def main():
-    """Main entry point - run HTTP server for Railway deployment."""
-    import sys
-    
-    if "--mcp" in sys.argv:
-        # Run as MCP server (STDIO transport)
-        asyncio.run(run_mcp_server())
-    else:
-        # Run as HTTP server for Railway deployment
-        port = int(os.getenv("PORT", 8000))
-        uvicorn.run(app, host="0.0.0.0", port=port)
-
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
